@@ -650,6 +650,7 @@ always go to Evil modes if you need to with ~C-z~).
 | agent-shell-qwen-acp-command                  | Command and parameters for the Qwen Code client.                                |
 | agent-shell-qwen-authentication               | Configuration for Qwen Code authentication.                                     |
 | agent-shell-qwen-environment                  | Environment variables for the Qwen Code client.                                 |
+| agent-shell-region-context-max-lines          | Limit region context to this many lines                                         |
 | agent-shell-screenshot-command                | The program to use for capturing screenshots.                                   |
 | agent-shell-section-functions                 | Abnormal hook run after overlays are applied (experimental).                    |
 | agent-shell-session-strategy                  | How to handle sessions when starting a new shell.                               |

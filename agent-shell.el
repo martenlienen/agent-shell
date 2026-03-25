@@ -291,6 +291,11 @@ passed through to `acp-make-client'."
                                                    (map-elt (buffer-local-value 'agent-shell--state context-buffer)
                                                             :outgoing-request-decorator)))))
 
+(defcustom agent-shell-region-context-max-lines nil
+  "Limit region context to at most this many lines if non-nil."
+  :type '(choice (const nil) integer)
+  :group 'agent-shell)
+
 (defcustom agent-shell-text-file-capabilities t
   "Whether agents are initialized with read/write text file capabilities.
 
@@ -5736,8 +5741,7 @@ Uses AGENT-CWD to shorten file paths where necessary."
                                    (numbered-preview
                                     (when-let ((buffer (get-file-buffer (map-elt region :file))))
                                       (let ((char-start (map-elt region :char-start))
-                                            (char-end (map-elt region :char-end))
-                                            (max-preview-lines 5))
+                                            (char-end (map-elt region :char-end)))
                                         (if (equal (line-number-at-pos char-start)
                                                    (line-number-at-pos char-end))
                                             ;; Same line region? Avoid numbering.
@@ -5746,7 +5750,7 @@ Uses AGENT-CWD to shorten file paths where necessary."
                                            :buffer buffer
                                            :from char-start
                                            :to char-end
-                                           :cap max-preview-lines))))))
+                                           :cap agent-shell-region-context-max-lines))))))
                                (if numbered-preview
                                    (concat file-link "\n\n" numbered-preview)
                                  file-link))
