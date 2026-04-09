@@ -662,6 +662,34 @@ With EXISTING-ONLY, only return existing buffers without creating."
               (agent-shell-viewport-edit-mode)
               (current-buffer))))))))
 
+(defun agent-shell-viewport--block-quote (text)
+  "Prefix each line of TEXT with \"> \"."
+  (concat "> " (replace-regexp-in-string "\n" "\n> " text)))
+
+(cl-defun agent-shell-viewport--setup-reply (&key reply-context quoted-text)
+  "Set up the buffer to compose a reply.
+
+REPLY-CONTEXT is shown as read-only context at the top.  QUOTED-TEXT is
+inserted as a block quote as part of the reply."
+  (with-current-buffer (agent-shell-viewport--shell-buffer)
+    (goto-char (point-max)))
+  (let ((had-snapshot agent-shell-viewport--compose-snapshot))
+    (agent-shell-viewport-edit-mode)
+    (agent-shell-viewport--initialize)
+    (agent-shell-viewport--restore-compose-snapshot :reply-context reply-context)
+    (when quoted-text
+      (goto-char (point-max))
+      (insert (if had-snapshot "\n\n" "")
+              (agent-shell-viewport--block-quote quoted-text) "\n\n"))
+    ;; Skip past any cursor-intangible layout text (e.g. the
+    ;; newline inserted by `agent-shell-viewport--initialize')
+    ;; so callers like `agent-shell-viewport-reply-1' can insert.
+    (goto-char (if (or had-snapshot quoted-text
+                       (and reply-context (not (string-empty-p reply-context))))
+                   (point-max)
+                 (or (next-single-property-change (point-min) 'cursor-intangible)
+                     (point-max))))))
+
 (defun agent-shell-viewport-reply ()
   "Reply as a follow-up and compose another prompt/query."
   (declare (modes agent-shell-viewport-view-mode))
@@ -671,31 +699,22 @@ With EXISTING-ONLY, only return existing buffers without creating."
   (when (agent-shell-viewport--busy-p)
     (user-error "Busy, please wait"))
   (let* ((region (map-elt (agent-shell--get-region :deactivate t) :content))
-         (block-quoted-text (when region
-                              (concat
-                               (mapconcat (lambda (line)
-                                            (concat "> " line))
-                                          (split-string region "\n")
-                                          "\n")
-                               "\n\n")))
          (last-response (string-trim (or (agent-shell-viewport--response) ""))))
-    (with-current-buffer (agent-shell-viewport--shell-buffer)
-      (goto-char (point-max)))
-    (let ((had-snapshot agent-shell-viewport--compose-snapshot))
-      (agent-shell-viewport-edit-mode)
-      (agent-shell-viewport--initialize)
-      (agent-shell-viewport--restore-compose-snapshot :reply-context last-response)
-      (when block-quoted-text
-        (goto-char (point-max))
-        (insert (if had-snapshot "\n\n" "") block-quoted-text))
-      ;; Skip past any cursor-intangible layout text (e.g. the
-      ;; newline inserted by `agent-shell-viewport--initialize')
-      ;; so callers like `agent-shell-viewport-reply-1' can insert.
-      (goto-char (if (or had-snapshot block-quoted-text
-                         (not (string-empty-p last-response)))
-                     (point-max)
-                   (or (next-single-property-change (point-min) 'cursor-intangible)
-                       (point-max)))))))
+    (agent-shell-viewport--setup-reply
+     :reply-context (unless region last-response)
+     :quoted-text region)))
+
+(defun agent-shell-viewport-quote-reply ()
+  "Reply with the entire response block-quoted."
+  (declare (modes agent-shell-viewport-view-mode))
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-viewport-view-mode)
+    (user-error "Not in a shell viewport buffer"))
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
+  (let ((response (or (agent-shell-viewport--response) "")))
+    (agent-shell-viewport--setup-reply
+     :quoted-text (string-trim (substring-no-properties response)))))
 
 (defun agent-shell-viewport-reply-yes ()
   "Reply with \"yes\" and send immediately."
@@ -1036,6 +1055,7 @@ VIEWPORT-BUFFER is the viewport buffer to check."
     (define-key map (kbd "f") #'agent-shell-viewport-next-page)
     (define-key map (kbd "b") #'agent-shell-viewport-previous-page)
     (define-key map (kbd "r") #'agent-shell-viewport-reply)
+    (define-key map (kbd "R") #'agent-shell-viewport-quote-reply)
     (define-key map (kbd "y") #'agent-shell-viewport-reply-yes)
     (define-key map (kbd "1") #'agent-shell-viewport-reply-1)
     (define-key map (kbd "2") #'agent-shell-viewport-reply-2)
@@ -1091,6 +1111,9 @@ VIEWPORT-BUFFER is the viewport buffer to check."
                       agent-shell-viewport-view-mode-map
                       '(((:function . agent-shell-viewport-reply)
                          (:description . "Reply…")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-quote-reply)
+                         (:description . "Quote reply…")
                          (:if-not . agent-shell-viewport--busy-p))
                         ((:function . agent-shell-viewport-reply-yes)
                          (:description . "Reply \"yes\"")
