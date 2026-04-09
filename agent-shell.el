@@ -45,6 +45,7 @@
 (require 'dired)
 (require 'diff)
 (require 'json)
+(require 'mailcap)
 (require 'map)
 (unless (require 'markdown-overlays nil 'noerror)
   (error "Please update 'shell-maker' to v0.90.1 or newer"))
@@ -4632,30 +4633,48 @@ Returns an alist with:
   :size - file size in bytes
   :extension - file extension (lowercase)
   :mime-type - MIME type based on extension
-  :base64-p - t if content is base64-encoded (binary image), nil otherwise
+  :base64-p - t if content is base64-encoded (binary file), nil otherwise
   :content - file content (omitted when SHALLOW is non-nil)"
   (let* ((ext (downcase (or (file-name-extension file-path) "")))
-         (mime-type (or (agent-shell--image-type-to-mime file-path)
-                        "text/plain"))
-         ;; Only treat supported binary image formats as binary
-         ;; SVG is XML/text and should not be base64-encoded
-         ;; API only supports: image/png, image/jpeg, image/gif, image/webp
-         (is-binary (member mime-type '("image/png" "image/jpeg" "image/gif" "image/webp")))
+         (mime-type (mailcap-extension-to-mime ext))
          (file-size (file-attribute-size (file-attributes file-path)))
-         (content (unless shallow
-                    (with-temp-buffer
-                      (if is-binary
-                          (progn
-                            (insert-file-contents-literally file-path)
-                            (base64-encode-string (buffer-string) t))
-                        (insert-file-contents file-path)
-                        (buffer-string))))))
+         (is-binary nil)
+         (content
+          (unless shallow
+            ;; If we have a known MIME type that is not explicitly a text type
+            (if (and mime-type
+                     (not (or (string-prefix-p "text/" mime-type)
+                              (string-match-p "\\(?:json\\|xml\\|yaml\\)$" mime-type))))
+                ;; Read contents as base-64 encoded binary
+                (progn
+                  (setq is-binary t)
+                  (with-temp-buffer
+                    (set-buffer-multibyte nil)
+                    (insert-file-contents-literally file-path)
+                    (base64-encode-string (buffer-string) t)))
+              ;; If MIME type is unknown or looks like text, just try reading as text
+              (with-temp-buffer
+                (insert-file-contents file-path)
+                ;; If text decoding produced raw bytes, it is a binary file after all, so
+                ;; we base64-encode it
+                (if (memq 'eight-bit (find-charset-string (buffer-string)))
+                    (progn
+                      (setq is-binary t)
+                      (unless mime-type
+                        (setq mime-type "application/octet-stream"))
+                      (erase-buffer)
+                      (set-buffer-multibyte nil)
+                      (insert-file-contents-literally file-path)
+                      (base64-encode-string (buffer-string) t))
+                  (unless mime-type
+                    (setq mime-type "text/plain"))
+                  (buffer-string)))))))
     (append (list (cons :size file-size)
                   (cons :extension ext)
-                  (cons :mime-type mime-type)
-                  (cons :base64-p is-binary))
+                  (cons :mime-type mime-type))
             (unless shallow
-              (list (cons :content content))))))
+              (list (cons :base64-p is-binary)
+                    (cons :content content))))))
 
 (cl-defun agent-shell--load-image (&key file-path (max-width 200))
   "Load image from FILE-PATH and return the image object.
