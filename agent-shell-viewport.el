@@ -651,109 +651,22 @@ With EXISTING-ONLY, only return existing buffers without creating."
     ;; Setting point isn't enough at times. Force scrolling.
     (set-window-start (selected-window) (point-min))))
 
-(defun agent-shell-viewport-reply-yes ()
-  "Reply with \"yes\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "yes")
-  (agent-shell-viewport-compose-send))
+(defmacro agent-shell-viewport--def-replies (replies)
+  "Define reply-and-send commands for each reply in REPLIES."
+  `(progn
+     ,@(mapcar
+        (lambda (text)
+          `(defun ,(intern (format "agent-shell-viewport-reply-%s" text)) ()
+             ,(format "Reply with \"%s\" and send immediately." text)
+             (declare (modes agent-shell-viewport-view-mode))
+             (interactive)
+             (agent-shell-viewport-reply)
+             (insert ,text)
+             (agent-shell-viewport-compose-send)))
+        replies)))
 
-(defun agent-shell-viewport-reply-1 ()
-  "Reply with \"1\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "1")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-2 ()
-  "Reply with \"2\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "2")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-3 ()
-  "Reply with \"3\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "3")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-4 ()
-  "Reply with \"4\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "4")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-5 ()
-  "Reply with \"5\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "5")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-6 ()
-  "Reply with \"6\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "6")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-7 ()
-  "Reply with \"7\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "7")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-8 ()
-  "Reply with \"8\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "8")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-9 ()
-  "Reply with \"9\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "9")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-more ()
-  "Reply with \"more\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "more")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-again ()
-  "Reply with \"again\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "again")
-  (agent-shell-viewport-compose-send))
-
-(defun agent-shell-viewport-reply-continue ()
-  "Reply with \"continue\" and send immediately."
-  (declare (modes agent-shell-viewport-view-mode))
-  (interactive)
-  (agent-shell-viewport-reply)
-  (insert "continue")
-  (agent-shell-viewport-compose-send))
+(agent-shell-viewport--def-replies
+ ("yes" "more" "again" "continue" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
 
 (defun agent-shell-viewport-previous-page ()
   "Show previous interaction (request / response)."
