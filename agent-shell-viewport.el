@@ -731,8 +731,8 @@ buffer from the snapshot and switch to edit mode."
   (let* ((shell-buffer (or (agent-shell--current-shell)
                            (user-error "Not in an agent-shell buffer")))
          (viewport-buffer (agent-shell-viewport--buffer
-                          :shell-buffer shell-buffer
-                          :existing-only t)))
+                           :shell-buffer shell-buffer
+                           :existing-only t)))
     (with-current-buffer shell-buffer
       (agent-shell-set-session-model
        (lambda ()
@@ -748,8 +748,8 @@ buffer from the snapshot and switch to edit mode."
   (let* ((shell-buffer (or (agent-shell--current-shell)
                            (user-error "Not in an agent-shell buffer")))
          (viewport-buffer (agent-shell-viewport--buffer
-                          :shell-buffer shell-buffer
-                          :existing-only t)))
+                           :shell-buffer shell-buffer
+                           :existing-only t)))
     (with-current-buffer shell-buffer
       (agent-shell-set-session-mode
        (lambda ()
@@ -766,8 +766,8 @@ buffer from the snapshot and switch to edit mode."
   (let* ((shell-buffer (or (agent-shell--current-shell)
                            (user-error "Not in an agent-shell buffer")))
          (viewport-buffer (agent-shell-viewport--buffer
-                          :shell-buffer shell-buffer
-                          :existing-only t)))
+                           :shell-buffer shell-buffer
+                           :existing-only t)))
     (with-current-buffer shell-buffer
       (agent-shell-cycle-session-mode
        (lambda ()
