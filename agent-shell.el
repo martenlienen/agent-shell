@@ -693,7 +693,8 @@ OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
         (cons :set-session-mode nil)
         (cons :session (list (cons :id nil)
                              (cons :mode-id nil)
-                             (cons :modes nil)))
+                             (cons :modes nil)
+                             (cons :config-options nil)))
         (cons :last-entry-type nil)
         (cons :chunked-group-count 0)
         (cons :request-count 0)
@@ -1712,10 +1713,9 @@ COMMAND, when present, may be a shell command string or an argv vector."
              ;; Note: No need to set :last-entry-type as no text was inserted.
              (agent-shell--update-header-and-mode-line)))
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "config_option_update")
-           ;; Silently handle config option updates (e.g., from set_model/set_mode)
-           ;; These are informational notifications that don't require user-visible output
-           ;; Note: No need to set :last-entry-type as no text was inserted.
-           nil)
+           (let ((config-options (map-nested-elt acp-notification '(params update configOptions))))
+             (map-put! (map-elt state :session) :config-options config-options))
+           (agent-shell--update-header-and-mode-line))
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "usage_update")
            ;; Extract context window and cost information
            (agent-shell--update-usage-from-notification
@@ -2508,14 +2508,14 @@ Returns propertized labels in :status and :title propertized."
   (when-let ((tool-call (map-nested-elt state `(:tool-calls ,tool-call-id))))
     (let* ((title (when-let ((text (agent-shell--shorten-paths
                                     (map-elt tool-call :title)))
-                            ;; Execute commands go to body instead; use description as title.
-                            ((not (equal (map-elt tool-call :kind) "execute"))))
+                             ;; Execute commands go to body instead; use description as title.
+                             ((not (equal (map-elt tool-call :kind) "execute"))))
                     ;; Strip kind prefix from title to avoid
                     ;; redundancy "[read] Read file.el" becomes
                     ;; "[read] file.el"
                     (if (and (map-elt tool-call :kind)
                              (string-match-p (concat "\\`" (regexp-quote
-                                                           (map-elt tool-call :kind)) " ")
+                                                            (map-elt tool-call :kind)) " ")
                                              (downcase text)))
                         (string-trim-left (substring text (length (map-elt tool-call :kind))))
                       text)))
@@ -3171,13 +3171,16 @@ The model contains all inputs needed to render the graphical header."
                       (or (agent-shell--resolve-session-mode-name
                            mode-id
                            (agent-shell--get-available-modes state))
-                          mode-id))))
+                          mode-id)))
+         (reasoning-effort (seq-find (lambda (o) (string-equal "reasoning_effort" (map-elt o 'id)))
+                                     (map-nested-elt state '(:session :config-options)))))
     `((:buffer-name . ,(map-nested-elt state '(:agent-config :buffer-name)))
       (:icon-name . ,(map-nested-elt state '(:agent-config :icon-name)))
       (:model-id . ,(map-nested-elt state '(:session :model-id)))
       (:model-name . ,model-name)
       (:mode-id . ,mode-id)
       (:mode-name . ,mode-name)
+      (:reasoning-effort . ,(map-elt reasoning-effort 'currentValue))
       (:project-name . ,(agent-shell--project-name))
       (:session-id . ,(agent-shell--session-id-indicator))
       (:frame-width . ,(frame-pixel-width))
@@ -3201,7 +3204,7 @@ Joins all values from the model alist."
   (mapconcat (lambda (pair) (format "%s" (cdr pair)))
              model "|"))
 
-(cl-defun agent-shell--make-header (state &key qualifier bindings model-binding mode-binding)
+(cl-defun agent-shell--make-header (state &key qualifier bindings model-binding mode-binding reasoning-effort-binding)
   "Return header text for current STATE.
 
 STATE should contain :agent-config with :icon-name, :buffer-name, and
@@ -3215,6 +3218,8 @@ BINDINGS is a list of alists defining key bindings to display, each with:
 
 MODEL-BINDING: Optional key description string for the model menu command.
 MODE-BINDING: Optional key description string for the session mode menu command.
+REASONING-EFFORT-BINDING: Optional key description string for the
+reasoning-effort menu command.
 When provided, included in help-echo tooltips."
   (unless state
     (error "STATE is required"))
@@ -3222,24 +3227,44 @@ When provided, included in help-echo tooltips."
          (text-header (format " %s%s%s @ %s%s%s%s"
                               (propertize (map-elt header-model :buffer-name)
                                           'font-lock-face 'font-lock-variable-name-face)
-                              (if (map-elt header-model :model-name)
-                                  (concat " ➤ " (propertize (map-elt header-model :model-name)
-                                                            'font-lock-face 'font-lock-negation-char-face
-                                                            'help-echo (concat "Click to open LLM model menu "
-                                                                               (when model-binding
-                                                                                 (propertize model-binding 'face 'help-key-binding)))
-                                                            'mouse-face 'mode-line-highlight
-                                                            'local-map (let ((map (make-sparse-keymap)))
-                                                                         (define-key map [header-line mouse-1]
-                                                                                     (agent-shell--mode-line-model-menu))
-                                                                         map)))
+                              (if-let* ((model-name (map-elt header-model :model-name)))
+                                  (let ((name-label
+                                         (propertize model-name
+                                                     'font-lock-face 'font-lock-negation-char-face
+                                                     'help-echo (if model-binding
+                                                                    (concat "Click to open LLM model menu "
+                                                                            (propertize model-binding 'face 'help-key-binding))
+                                                                  "")
+                                                     'mouse-face 'mode-line-highlight
+                                                     'local-map (let ((map (make-sparse-keymap)))
+                                                                  (define-key map [header-line mouse-1]
+                                                                              (agent-shell--mode-line-model-menu))
+                                                                  map)))
+                                        (effort-label
+                                         (if-let* ((effort (map-elt header-model :reasoning-effort)))
+                                             (let ((indicator (propertize effort
+                                                                          'font-lock-face 'font-lock-negation-char-face
+                                                                          'help-echo (if reasoning-effort-binding
+                                                                                         (concat "Click to select effort level "
+                                                                                                 (propertize reasoning-effort-binding 'face 'help-key-binding))
+                                                                                       "")
+                                                                          'mouse-face 'mode-line-highlight
+                                                                          'local-map (let ((map (make-sparse-keymap)))
+                                                                                       (define-key map [header-line mouse-1]
+                                                                                                   ;; TODO: Change for reasoning
+                                                                                                   (agent-shell--mode-line-model-menu))
+                                                                                       map))))
+                                               (concat " (" indicator ")"))
+                                           "")))
+                                    (concat " ➤ " name-label effort-label))
                                 "")
                               (if (map-elt header-model :mode-name)
                                   (concat " ➤ " (propertize (map-elt header-model :mode-name)
                                                             'font-lock-face 'font-lock-type-face
-                                                            'help-echo (concat "Click to open session mode menu "
-                                                                               (when mode-binding
-                                                                                 (propertize mode-binding 'face 'help-key-binding)))
+                                                            'help-echo (if mode-binding
+                                                                           (concat "Click to open session mode menu "
+                                                                                   (propertize mode-binding 'face 'help-key-binding))
+                                                                         "")
                                                             'mouse-face 'mode-line-highlight
                                                             'local-map (let ((map (make-sparse-keymap)))
                                                                          (define-key map [header-line mouse-1]
@@ -3327,7 +3352,15 @@ When provided, included in help-echo tooltips."
                                                           (dom-node 'tspan
                                                                     `((fill . ,(face-attribute 'font-lock-negation-char-face :foreground))
                                                                       (dx . "8"))
-                                                                    (map-elt header-model :model-name))))
+                                                                    ;; TODO: Add reasoning effort here
+                                                                    (map-elt header-model :model-name)))
+                                        (when-let* ((effort (map-elt header-model :reasoning-effort)))
+                                          (dom-append-child text-node
+                                                            (dom-node 'tspan
+                                                                      `((fill . ,(face-attribute 'font-lock-negation-char-face :foreground))
+                                                                        (dx . "8"))
+                                                                      ;; TODO: Add reasoning effort here
+                                                                      (format "(%s)" effort)))))
                                       ;; Session mode (optional)
                                       (when (map-elt header-model :mode-id)
                                         ;; Add separator arrow
@@ -3453,7 +3486,10 @@ Returns a MIME type like \"image/png\" or \"image/jpeg\"."
                                                                    agent-shell-mode-map t))
                                   :mode-binding (key-description (where-is-internal
                                                                   'agent-shell-set-session-mode
-                                                                  agent-shell-mode-map t))))
+                                                                  agent-shell-mode-map t))
+                                  :reasoning-effort-binding (key-description (where-is-internal
+                                                                              'agent-shell-set-session-reasoning-effort
+                                                                              agent-shell-mode-map t))))
   (when (memq agent-shell-header-style '(text none nil))
     (force-mode-line-update)))
 
@@ -4124,25 +4160,25 @@ Falls back to latest session in batch mode (e.g. tests)."
     (if noninteractive
         (car acp-sessions)
       (let* ((other-shells (seq-remove (lambda (b) (eq b (current-buffer)))
-                                      (agent-shell-buffers)))
+                                       (agent-shell-buffers)))
              (new-session-choice "Start new shell")
              (columns (agent-shell--session-selection-columns))
              (max-widths (when acp-sessions
-                          (mapcar (lambda (col)
-                                    (cons col (apply #'max
-                                                     (mapcar (lambda (s)
-                                                               (length (agent-shell--session-column-value col s)))
-                                                             acp-sessions))))
-                                  columns)))
+                           (mapcar (lambda (col)
+                                     (cons col (apply #'max
+                                                      (mapcar (lambda (s)
+                                                                (length (agent-shell--session-column-value col s)))
+                                                              acp-sessions))))
+                                   columns)))
              (session-choices (append (list (cons new-session-choice nil))
-                              (when other-shells
-                                (list (cons "Open existing shell" :other-shell)))
-                              (mapcar (lambda (acp-session)
-                                        (cons (agent-shell--session-choice-label
-                                               :acp-session acp-session
-                                               :max-widths max-widths)
-                                              acp-session))
-                                      acp-sessions)))
+                                      (when other-shells
+                                        (list (cons "Open existing shell" :other-shell)))
+                                      (mapcar (lambda (acp-session)
+                                                (cons (agent-shell--session-choice-label
+                                                       :acp-session acp-session
+                                                       :max-widths max-widths)
+                                                      acp-session))
+                                              acp-sessions)))
              (candidates (mapcar #'car session-choices))
              ;; Some completion frameworks yielded appended (nil) to each line
              ;; unless this-command was bound.
@@ -4190,7 +4226,8 @@ Falls back to latest session in batch mode (e.g. tests)."
                                                    `((:model-id . ,(map-elt model 'modelId))
                                                      (:name . ,(map-elt model 'name))
                                                      (:description . ,(map-elt model 'description))))
-                                                 (map-nested-elt acp-response '(models availableModels)))))))
+                                                 (map-nested-elt acp-response '(models availableModels))))
+                           (cons :config-options (map-elt acp-response 'configOptions)))))
 
 (cl-defun agent-shell--finalize-session-init (&key on-session-init)
   "Finalize session initialization and invoke ON-SESSION-INIT."
@@ -4247,7 +4284,8 @@ Falls back to latest session in batch mode (e.g. tests)."
                                                                   `((:model-id . ,(map-elt model 'modelId))
                                                                     (:name . ,(map-elt model 'name))
                                                                     (:description . ,(map-elt model 'description))))
-                                                                (map-nested-elt acp-response '(models availableModels))))))
+                                                                (map-nested-elt acp-response '(models availableModels))))
+                                          (cons :config-options (map-elt acp-response 'configOptions))))
                  (agent-shell--update-fragment
                   :state agent-shell--state
                   :block-id "starting"
@@ -6256,6 +6294,7 @@ Shows \" ⧉\" when a command prefix is used."
                                       'mouse-face 'mode-line-highlight
                                       'local-map (let ((map (make-sparse-keymap)))
                                                    (define-key map [mode-line mouse-1]
+                                                               ;; TODO: Bind to selecting reasoning effort
                                                                (agent-shell--mode-line-model-menu))
                                                    map))))
             (when-let ((mode-name (agent-shell--resolve-session-mode-name
@@ -6443,6 +6482,114 @@ Optionally, get notified of completion with ON-SUCCESS function."
                      (funcall on-success)))
      :on-failure (lambda (acp-error _raw-message)
                    (message "Failed to change model: %s" acp-error)))))
+
+(defun agent-shell-set-session-reasoning-effort (&optional on-success)
+  "Set session model.
+
+Optionally, get notified of completion with ON-SUCCESS function."
+  (declare (modes agent-shell-mode))
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Not in an agent-shell buffer"))
+  (unless (map-nested-elt (agent-shell--state) '(:session :id))
+    (user-error "No active session"))
+  (let* ((current-model-id (map-nested-elt (agent-shell--state) '(:session :model-id)))
+         (available-models (map-nested-elt (agent-shell--state) '(:session :models)))
+         (default-model-name (and current-model-id
+                                  (map-elt (seq-find (lambda (model)
+                                                       (string= (map-elt model :model-id) current-model-id))
+                                                     available-models)
+                                           :name)))
+         (model-choices (seq-mapn (lambda (title model)
+                                    (cons title (map-elt model :model-id)))
+                                  (agent-shell--align-alist
+                                   :data available-models
+                                   :columns (list
+                                             (lambda (model)
+                                               (map-elt model :name))
+                                             (lambda (model)
+                                               (format "(%s)" (map-elt model :model-id)))))
+                                  available-models))
+         (selection (completing-read "Set model: "
+                                     (mapcar #'car model-choices)
+                                     nil t nil nil
+                                     (and default-model-name
+                                          (car (seq-find (lambda (choice)
+                                                           (string-prefix-p default-model-name (car choice)))
+                                                         model-choices)))))
+         (selected-model-id (cdr (seq-find (lambda (choice)
+                                             (string= selection (car choice)))
+                                           model-choices))))
+    (unless selected-model-id
+      (user-error "Unknown model: %s" selection))
+    (when (and current-model-id (string= selected-model-id current-model-id))
+      (error "Session model already %s" (map-elt (seq-find (lambda (model)
+                                                             (string= (map-elt model :model-id) selected-model-id))
+                                                           available-models)
+                                                 :name)))
+    (agent-shell--send-request
+     :state (agent-shell--state)
+     :client (map-elt (agent-shell--state) :client)
+     :request (acp-make-session-set-model-request
+               :session-id (map-nested-elt (agent-shell--state) '(:session :id))
+               :model-id selected-model-id)
+     :on-success (lambda (_acp-response)
+                   (let ((updated-session (map-elt (agent-shell--state) :session)))
+                     (map-put! updated-session :model-id selected-model-id)
+                     (map-put! (agent-shell--state) :session updated-session)
+                     (message "Model: %s"
+                              (map-elt (seq-find (lambda (model)
+                                                   (string= (map-elt model :model-id) selected-model-id))
+                                                 (map-nested-elt (agent-shell--state) '(:session :models)))
+                                       :name)))
+                   (agent-shell--update-header-and-mode-line)
+                   (when on-success
+                     (funcall on-success)))
+     :on-failure (lambda (acp-error _raw-message)
+                   (message "Failed to change model: %s" acp-error)))))
+
+(defun agent-shell-set-session-config-option (&optional on-success)
+  "Choose and set a config option in the active session.
+
+Optionally, get notified of completion with ON-SUCCESS function."
+  (declare (modes agent-shell-mode))
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Not in an agent-shell buffer"))
+  (unless (map-nested-elt (agent-shell--state) '(:session :id))
+    (user-error "No active session"))
+  (let* ((options (map-nested-elt (agent-shell--state) '(:session :config-options)))
+         (option (completing-read "Option: "
+                                  (mapcar (lambda (o) (map-elt o 'id)) options)
+                                  nil t)))
+    ;; (unless selected-model-id
+    ;;   (user-error "Unknown model: %s" selection))
+    ;; (when (and current-model-id (string= selected-model-id current-model-id))
+    ;;   (error "Session model already %s" (map-elt (seq-find (lambda (model)
+    ;;                                                          (string= (map-elt model :model-id) selected-model-id))
+    ;;                                                        available-models)
+    ;;                                              :name)))
+    ;; (agent-shell--send-request
+    ;;  :state (agent-shell--state)
+    ;;  :client (map-elt (agent-shell--state) :client)
+    ;;  :request (acp-make-session-set-model-request
+    ;;            :session-id (map-nested-elt (agent-shell--state) '(:session :id))
+    ;;            :model-id selected-model-id)
+    ;;  :on-success (lambda (_acp-response)
+    ;;                (let ((updated-session (map-elt (agent-shell--state) :session)))
+    ;;                  (map-put! updated-session :model-id selected-model-id)
+    ;;                  (map-put! (agent-shell--state) :session updated-session)
+    ;;                  (message "Model: %s"
+    ;;                           (map-elt (seq-find (lambda (model)
+    ;;                                                (string= (map-elt model :model-id) selected-model-id))
+    ;;                                              (map-nested-elt (agent-shell--state) '(:session :models)))
+    ;;                                    :name)))
+    ;;                (agent-shell--update-header-and-mode-line)
+    ;;                (when on-success
+    ;;                  (funcall on-success)))
+    ;;  :on-failure (lambda (acp-error _raw-message)
+    ;;                (message "Failed to change model: %s" acp-error)))
+    ))
 
 (defun agent-shell--format-available-modes (modes)
   "Format MODES for shell rendering."
