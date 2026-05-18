@@ -668,6 +668,10 @@ Some minor modes (for example, =aggressive-indent-mode=) can interfere with an a
 
 All of the above settings can be applied on a per-project basis using [[https://www.gnu.org/software/emacs/manual/html_node/emacs/Directory-Variables.html][directory-local variables]].
 
+** Remote agents with TRAMP
+
+Running an agent on a remote host or container with TRAMP just works if the agent is installed on the host. For SSH, just open a remote file or directory =/ssh:host:/some/path= and then =M-x agent-shell=.
+
 ** Key bindings
 
 - =RET= - Submits prompt.
