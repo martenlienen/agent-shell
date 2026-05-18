@@ -2367,5 +2367,29 @@ and it must handle that cleanly."
     (let ((result (agent-shell--filter-buffer-substring (point-min) (point-max))))
       (should (equal result "Use foo-bar for that.")))))
 
+(ert-deftest agent-shell--resolve-path-test ()
+  "Test the four path/default-directory combinations of
+`agent-shell--resolve-path'."
+  (let ((agent-shell-path-resolver-function nil))
+    ;; TRAMP path, local `default-directory': strip TRAMP prefix.
+    (let ((default-directory "/tmp/"))
+      (should (equal (agent-shell--resolve-path "/ssh:hpc:/home/me/x.txt")
+                     "/home/me/x.txt")))
+
+    ;; TRAMP path, TRAMP `default-directory': strip TRAMP prefix
+    (let ((default-directory "/ssh:hpc:/home/me/"))
+      (should (equal (agent-shell--resolve-path "/ssh:hpc:/home/me/x.txt")
+                     "/home/me/x.txt")))
+
+    ;; Local path, local `default-directory': pass through unchanged.
+    (let ((default-directory "/tmp/"))
+      (should (equal (agent-shell--resolve-path "/home/me/x.txt")
+                     "/home/me/x.txt")))
+
+    ;; Local path, TRAMP `default-directory': prepend TRAMP prefix.
+    (let ((default-directory "/ssh:hpc:/home/me/"))
+      (should (equal (agent-shell--resolve-path "/home/me/x.txt")
+                     "/ssh:hpc:/home/me/x.txt")))))
+
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here

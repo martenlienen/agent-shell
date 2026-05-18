@@ -196,8 +196,26 @@ When non-nil, user message sections are expanded."
   "Function for resolving remote paths on the local file-system, and vice versa.
 
 Expects a function that takes the path as its single argument, and
-returns the resolved path.  Set to nil to disable mapping."
+returns the resolved path.  Set to nil to disable mapping.
+
+The resolver function will only ever receive paths that are local to
+either the agent or Emacs. This means that if an agent shell runs via
+TRAMP, agent-shell will handle TRAMP path prefixes transparently."
   :type 'function
+  :group 'agent-shell)
+
+(defcustom agent-shell-tramp-connection-profile
+  '((tramp-direct-async-process . t))
+  "Connection-local variables to apply for agent hosts.
+
+The value is an alist of (VARIABLE . VALUE) pairs that will be installed
+as a connection-local profile each time agent-shell starts an agent on a
+new TRAMP host.
+
+The default sets `tramp-direct-async-process' to t to ensure pipe
+semantics for the ACP connection as opposed to terminal semantics with
+input echo etc."
+  :type '(alist :key-type symbol :value-type sexp)
   :group 'agent-shell)
 
 (defvaralias
@@ -2088,8 +2106,31 @@ function before returning."
                          :message (error-message-string err)))))))
 
 (defun agent-shell--resolve-path (path)
-  "Resolve PATH using `agent-shell-path-resolver-function'."
-  (funcall (or agent-shell-path-resolver-function #'identity) path))
+  "Resolve PATH using `agent-shell-path-resolver-function'.
+
+This function also handles TRAMP path prefixes.  If the path is a TRAMP
+path, it strips the prefix before calling
+`agent-shell-path-resolver-function'.  If it is an agent (non-TRAMP)
+path and `default-directory' is TRAMP, we add its prefix to the output
+of `agent-shell-path-resolver-function'."
+  (if-let* ((is-tramp (file-remote-p path))
+            (local-path (if is-tramp (file-local-name path) path)))
+      (funcall (or agent-shell-path-resolver-function #'identity)
+               local-path)
+    (let ((resolved (funcall (or agent-shell-path-resolver-function #'identity)
+                             path)))
+      (if-let* ((tramp-prefix (file-remote-p default-directory)))
+          (concat tramp-prefix resolved)
+        resolved))))
+
+(defun agent-shell--ensure-tramp-connection-profile (host)
+  "Install `agent-shell-tramp-connection-profile' for HOST."
+  (connection-local-set-profile-variables
+   'agent-shell-tramp
+   agent-shell-tramp-connection-profile)
+  (connection-local-set-profiles
+   `(:application tramp :machine ,host)
+   'agent-shell-tramp))
 
 (defun agent-shell--cache-dir (&rest components)
   "Determine and create a system-dependent agent-shell cache directory.
@@ -2755,6 +2796,9 @@ variable (see makunbound)"))
                               :prompt-regexp (map-elt config :shell-prompt-regexp)))
          (agent-shell--shell-maker-config shell-maker-config)
          (default-directory (agent-shell-cwd))
+         (_ (when (file-remote-p default-directory)
+              (agent-shell--ensure-tramp-connection-profile
+               (file-remote-p default-directory 'host))))
          (shell-buffer
           ;; Suppress mode hook during shell-maker-start since
           ;; agent-shell state isn't ready yet.
@@ -2783,7 +2827,7 @@ variable (see makunbound)"))
         (kill-buffer shell-buffer)
         (error "No way to create a new client"))
       (let ((command (map-elt (funcall (map-elt config :client-maker) (current-buffer)) :command)))
-        (unless (executable-find command)
+        (unless (executable-find command (file-remote-p default-directory))
           (kill-buffer shell-buffer)
           (error "%s" (agent-shell--make-missing-executable-error
                        :executable command
