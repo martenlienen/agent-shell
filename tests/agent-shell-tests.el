@@ -3204,8 +3204,7 @@ KIND is a sessionUpdate string such as \"user_message_chunk\"."
   `((method . "session/update")
     (params . ((update . ((sessionUpdate . ,kind)
                           (content . ((type . "text")
-                                      (text . ,text))))))))
-)
+                                      (text . ,text)))))))))
 
 (defun agent-shell-tests--pending-restore-prompt-turns (state)
   "Return STATE's pending-restore prompt turns in chronological order.
@@ -3418,6 +3417,30 @@ interaction (e.g. \"1/2\" after switching to the latest interaction)."
             (should (equal rendered-position '((:current . 2) (:total . 2))))))
       (kill-buffer viewport-buffer)
       (kill-buffer shell-buffer))))
+
+(ert-deftest agent-shell--resolve-path-test ()
+  "Test the four path/default-directory combinations of
+`agent-shell--resolve-path'."
+  (let ((agent-shell-path-resolver-function nil))
+    ;; TRAMP path, local `default-directory': strip TRAMP prefix.
+    (let ((default-directory "/tmp/"))
+      (should (equal (agent-shell--resolve-path "/ssh:hpc:/home/me/x.txt")
+                     "/home/me/x.txt")))
+
+    ;; TRAMP path, TRAMP `default-directory': strip TRAMP prefix
+    (let ((default-directory "/ssh:hpc:/home/me/"))
+      (should (equal (agent-shell--resolve-path "/ssh:hpc:/home/me/x.txt")
+                     "/home/me/x.txt")))
+
+    ;; Local path, local `default-directory': pass through unchanged.
+    (let ((default-directory "/tmp/"))
+      (should (equal (agent-shell--resolve-path "/home/me/x.txt")
+                     "/home/me/x.txt")))
+
+    ;; Local path, TRAMP `default-directory': prepend TRAMP prefix.
+    (let ((default-directory "/ssh:hpc:/home/me/"))
+      (should (equal (agent-shell--resolve-path "/home/me/x.txt")
+                     "/ssh:hpc:/home/me/x.txt")))))
 
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here
