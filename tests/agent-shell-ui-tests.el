@@ -235,6 +235,35 @@ Returns the buffer.  Caller must kill it."
           (should (agent-shell-ui-tests--fragment-collapsed-p "ns" "1")))
       (kill-buffer buf))))
 
+(ert-deftest agent-shell-ui-toggle-survives-surgical-replace-test ()
+  "DWIM toggle target stays consistent after `--surgical-replace-body'.
+
+Surgical replace mints a fresh state plist on the new body chars
+but `:qualified-id` is stable.  DWIM resolves the target via
+`:qualified-id` so the toggle still hits the right fragment."
+  (let ((buf (agent-shell-ui-tests--make-buffer-with-fragments
+              '(((:namespace-id . "ns") (:block-id . "1")
+                 (:label-left . "Tool") (:body . "initial")
+                 (:expanded . t))))))
+    (unwind-protect
+        (with-current-buffer buf
+          (agent-shell-ui-update-fragment
+           (agent-shell-ui-make-fragment-model
+            :namespace-id "ns" :block-id "1"
+            :body "replaced body content")
+           :append nil :navigation 'always)
+          (goto-char (point-min))
+          (text-property-search-forward 'agent-shell-ui-state nil
+                                        (lambda (_ s) (and s t)) t)
+          (goto-char (prop-match-beginning
+                      (save-mark-and-excursion
+                        (text-property-search-backward
+                         'agent-shell-ui-state nil
+                         (lambda (_ s) (and s t)) t))))
+          (agent-shell-ui-toggle-fragment-dwim)
+          (should (agent-shell-ui-tests--fragment-collapsed-p "ns" "1")))
+      (kill-buffer buf))))
+
 ;;; provide
 
 (provide 'agent-shell-ui-tests)
