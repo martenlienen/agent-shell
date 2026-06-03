@@ -5339,18 +5339,18 @@ Returns an alist with:
   :content - file content (omitted when SHALLOW is non-nil)"
   (let* ((ext (downcase (or (file-name-extension file-path) "")))
          (file-size (file-attribute-size (file-attributes file-path)))
-         (mime-type (mailcap-extension-to-mime ext))
+         (mime-type (or (agent-shell--image-type-to-mime file-path)
+                        (mailcap-extension-to-mime ext)))
          (content-fields
           (unless shallow
-            (let ((raw-content (with-temp-buffer
-                                 (set-buffer-multibyte nil)
-                                 (insert-file-contents-literally file-path)
-                                 (buffer-string)))
-                  ;; Same heuristic that git uses
-                  (is-binary (string-search "\0" raw-content))
-                  (content (if is-binary
-                               (base64-encode-string raw-content)
-                             (decode-coding-string raw-content 'undecided t))))
+            (let* ((raw-content (with-temp-buffer
+                                  (insert-file-contents-literally file-path)
+                                  (buffer-string)))
+                   ;; Same heuristic that git uses
+                   (is-binary (string-search "\0" raw-content))
+                   (content (if is-binary
+                                (base64-encode-string raw-content t)
+                              (decode-coding-string raw-content 'undecided t))))
               ;; Set a better default MIME type for unknown extensions
               ;; based on the content
               (unless mime-type
