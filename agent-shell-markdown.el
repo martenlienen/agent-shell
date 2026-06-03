@@ -834,11 +834,11 @@ with `emacs-lisp-mode' face properties on the body and a
                                                   (marker-position body-start))
           (add-text-properties (marker-position body-start) body-bg-end
                                `(agent-shell-markdown-frozen t
-                                 agent-shell-non-trimmable t
-                                 rear-nonsticky (agent-shell-markdown-frozen
-                                                 agent-shell-non-trimmable)
-                                 line-prefix ,prefix
-                                 wrap-prefix ,prefix))
+                                                             agent-shell-non-trimmable t
+                                                             rear-nonsticky (agent-shell-markdown-frozen
+                                                                             agent-shell-non-trimmable)
+                                                             line-prefix ,prefix
+                                                             wrap-prefix ,prefix))
           ;; Insert an actionable "LANG ⧉" / "snippet ⧉" label and the
           ;; surrounding panel padding as REAL BUFFER TEXT — no
           ;; `display' properties (which previously caused the body's
@@ -863,10 +863,22 @@ with `emacs-lisp-mode' face properties on the body and a
                  (content-start (copy-marker (marker-position body-start) t))
                  (kill-action (lambda ()
                                 (interactive)
-                                (kill-new (buffer-substring-no-properties
-                                           (marker-position content-start)
-                                           (marker-position body-end)))
-                                (message "Copied")))
+                                ;; Locate the body by text property in
+                                ;; the current buffer so copy works in
+                                ;; any buffer that received a propertized
+                                ;; copy of the rendered block (e.g. the
+                                ;; viewport).
+                                (when-let* ((start (next-single-property-change
+                                                    (point)
+                                                    'agent-shell-markdown-source-block-body))
+                                            ((get-text-property
+                                              start
+                                              'agent-shell-markdown-source-block-body))
+                                            (end (next-single-property-change
+                                                  start
+                                                  'agent-shell-markdown-source-block-body)))
+                                  (kill-new (buffer-substring-no-properties start end))
+                                  (message "Copied"))))
                  (vpad-line (propertize "\n"
                                         'face 'agent-shell-markdown-source-block
                                         'line-prefix prefix
@@ -900,6 +912,12 @@ with `emacs-lisp-mode' face properties on the body and a
               (add-text-properties (marker-position body-start)
                                    (marker-position content-start)
                                    carried))
+            ;; Tag body content so the label's copy action can locate
+            ;; it by text property, survives a propertized copy into
+            ;; another buffer (e.g. viewport).
+            (put-text-property (marker-position content-start)
+                               (marker-position body-end)
+                               'agent-shell-markdown-source-block-body t)
             ;; Bottom vpad: insert a single tinted `\\n' AFTER the
             ;; body's trailing newline so the panel ends on a blank
             ;; tinted line below the last body line.  body-end
