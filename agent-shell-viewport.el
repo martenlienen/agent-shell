@@ -33,6 +33,7 @@
 (require 'subr-x)
 (require 'window)
 (require 'flymake)
+(require 'agent-shell-list-edit)
 (require 'markdown-overlays)
 (require 'shell-maker)
 (require 'transient)
@@ -1407,6 +1408,7 @@ For example, offer to kill associated shell session."
   (setq buffer-read-only nil)
   (when agent-shell-file-completion-enabled
     (agent-shell-completion-mode +1))
+  (agent-shell-list-edit-mode +1)
   (agent-shell-viewport--update-header)
   (let ((inhibit-read-only t))
     (erase-buffer))
