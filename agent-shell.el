@@ -4,10 +4,10 @@
 
 ;; Author: Alvaro Ramirez https://xenodium.com
 ;; URL: https://github.com/xenodium/agent-shell
-;; Version: 0.53.1
+;; Version: 0.54.1
 ;; Package-Requires: ((emacs "29.1") (shell-maker "0.92.2") (acp "0.12.2"))
 
-(defconst agent-shell--version "0.53.1")
+(defconst agent-shell--version "0.54.1")
 
 ;; This package is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -622,18 +622,7 @@ configuration alist for backwards compatibility."
                         :key-type symbol :value-type sexp))
   :group 'agent-shell)
 
-(defcustom agent-shell-prefer-session-resume t
-  "Prefer ACP session resume over session load when both are available.
-
-When non-nil (and supported by agent), prefer ACP session resumes over loading."
-  :type 'boolean
-  :group 'agent-shell)
-
-(make-obsolete-variable 'agent-shell-prefer-session-resume
-                        'agent-shell-session-restore-strategy
-                        "agent-shell 0.52")
-
-(defcustom agent-shell-session-restore-strategy 'minimal
+(defcustom agent-shell-session-restore-verbosity 'minimal
   "How much prior context to show when restoring a session.
 
   `minimal': Show only the session title (default).  Uses
@@ -653,20 +642,44 @@ to `minimal' behavior."
                  (const :tag "Full replay" full))
   :group 'agent-shell)
 
+(defvar agent-shell-session-restore-strategy nil
+  "Obsolete.  Use `agent-shell-session-restore-verbosity' instead.
+
+Kept bound so init files that `setq' the old name don't get a
+`void-variable' error.  `agent-shell--start' detects a non-nil
+value and signals a migration error.")
+
+(make-obsolete-variable 'agent-shell-session-restore-strategy
+                        'agent-shell-session-restore-verbosity
+                        "agent-shell 0.54")
+
+(defun agent-shell--validate-session-strategy (value)
+  "Signal an error if VALUE is not a supported `agent-shell-session-strategy'.
+
+`new-deferred' was removed in agent-shell 0.54.  Use `new' for a fresh
+session without prompting, or `prompt' to choose."
+  (unless (memq value '(new latest prompt))
+    (user-error
+     (concat
+      "agent-shell-session-strategy value `%s' is no longer supported.\n"
+      "Use `new' for a fresh session, `latest' to load the most recent,\n"
+      "or `prompt' to choose.")
+     value)))
+
 (defcustom agent-shell-session-strategy 'prompt
   "How to handle sessions when starting a new shell.
 
 Available values:
 
-  `new-deferred': Start a new session, but defer initialization until the
-                  first prompt is submitted.
   `new': Always start a new session.
   `latest': Always load/resume the latest session.
   `prompt': Always prompt to choose a session (or start a new one)."
-  :type '(choice (const :tag "New session, deferred init" new-deferred)
-                 (const :tag "Always start new session" new)
+  :type '(choice (const :tag "Always start new session" new)
                  (const :tag "Load latest session" latest)
                  (const :tag "Prompt for session" prompt))
+  :set (lambda (sym value)
+         (agent-shell--validate-session-strategy value)
+         (set-default sym value))
   :group 'agent-shell)
 
 (defvar agent-shell-idle-timeout 30
@@ -2922,6 +2935,10 @@ OUTGOING-REQUEST-DECORATOR is passed through to `acp-make-client'."
 
 Please use 'agent-shell-transcript-file-path-function and unbind old
 variable (see makunbound)"))
+  (when agent-shell-session-restore-strategy
+    (user-error "Please migrate agent-shell-session-restore-strategy to agent-shell-session-restore-verbosity"))
+  (agent-shell--validate-session-strategy
+   (or session-strategy agent-shell-session-strategy))
   (let* ((shell-maker-config (agent-shell--make-shell-maker-config
                               :prompt (map-elt config :shell-prompt)
                               :prompt-regexp (map-elt config :shell-prompt-regexp)))
@@ -3021,6 +3038,17 @@ variable (see makunbound)"))
          :config shell-maker--config
          :output (funcall (map-elt config :welcome-function)
                           shell-maker--config)))
+      ;; TODO: Remove all `new-deferred' code paths.
+      ;; The value was removed from `agent-shell-session-strategy' in 0.54.1
+      ;; (see `agent-shell--validate-session-strategy'), but the branches
+      ;; were left behind temporarily.  Sites to clean up: this branch,
+      ;; the `restart' branch (`strategy' let-binding),
+      ;; the prompt-readiness guards in `agent-shell--handle' and
+      ;; `agent-shell-viewport-compose-send', `agent-shell--shell-buffer'
+      ;; (the deferred picker), `agent-shell--initiate-session-list-and-load',
+      ;; the `session-strategy' check in `agent-shell--start-acp-session',
+      ;; the `prompt'/`new'/`latest' subscriptions below, and
+      ;; `agent-shell--insert-to-shell-buffer'.
       (if (eq agent-shell-session-strategy 'new-deferred)
           ;; Show prompt now (unbootstrapped).
           (shell-maker-finish-output
@@ -4876,7 +4904,7 @@ Falls back to latest session in batch mode (e.g. tests)."
 (defun agent-shell--use-session-load-p (state)
   "Return non-nil when STATE should restore via `session/load'.
 
-`agent-shell-session-restore-strategy' decides the protocol:
+`agent-shell-session-restore-verbosity' decides the protocol:
 
   `first-last' and `full' force `session/load' when the agent
   advertises it (so a replay is available to read from); they
@@ -4885,7 +4913,7 @@ Falls back to latest session in batch mode (e.g. tests)."
   `minimal' uses `session/resume' when available, falling back
   to `session/load' only if the agent doesn't support resume."
   (cond
-   ((and (memq agent-shell-session-restore-strategy '(first-last full))
+   ((and (memq agent-shell-session-restore-verbosity '(first-last full))
          (map-elt state :supports-session-load))
     t)
    ((map-elt state :supports-session-resume)
@@ -4896,10 +4924,10 @@ Falls back to latest session in batch mode (e.g. tests)."
 (defun agent-shell--restore-summary-mode-p (state)
   "Return non-nil when STATE should accumulate a restore summary.
 
-Only true when `agent-shell-session-restore-strategy' is `first-last' and the
+Only true when `agent-shell-session-restore-verbosity' is `first-last' and the
 agent supports `session/load' (so a replay is available to read
 from)."
-  (and (eq agent-shell-session-restore-strategy 'first-last)
+  (and (eq agent-shell-session-restore-verbosity 'first-last)
        (map-elt state :supports-session-load)))
 
 (defun agent-shell--restore-summary-init (state)

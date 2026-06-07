@@ -1887,6 +1887,17 @@ code block content
              (lambda () nil)))
     (should-not (agent-shell--prompt-select-session nil))))
 
+(ert-deftest agent-shell--validate-session-strategy-test ()
+  "Test `agent-shell--validate-session-strategy' accepts supported values
+and rejects `new-deferred' and other unknown values."
+  (should-not (agent-shell--validate-session-strategy 'new))
+  (should-not (agent-shell--validate-session-strategy 'latest))
+  (should-not (agent-shell--validate-session-strategy 'prompt))
+  (should-error (agent-shell--validate-session-strategy 'new-deferred)
+                :type 'user-error)
+  (should-error (agent-shell--validate-session-strategy 'bogus)
+                :type 'user-error))
+
 (ert-deftest agent-shell--initiate-session-strategy-new-skips-list-load ()
   "Test `agent-shell--initiate-session' skips list/load when strategy is `new'."
   (with-temp-buffer
