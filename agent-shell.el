@@ -6169,7 +6169,11 @@ For example:
   => \"edit (foo.rs)\"
 
   TOOL-CALL with title \"Bash\" and command \"ls -la\"
-  => \"```console\\nls -la\\n```\""
+  => \"```console\\nls -la\\n```\"
+
+  TOOL-CALL with title \"emacs_eval-elisp\", kind \"other\",
+  and rawInput ((expression . \"(+ 1 2 3)\"))
+  => \"emacs_eval-elisp\\n\\n```\\n(+ 1 2 3)\\n```\""
   (let* ((title (map-elt tool-call :title))
          (raw-input (map-elt tool-call :raw-input))
          (command (agent-shell--tool-call-command-to-string
@@ -6221,6 +6225,25 @@ For example:
                (equal text command)
                (equal (map-elt tool-call :kind) "execute"))
       (setq text (concat "```console\n" text "\n```")))
+    ;; For "other"/unspecified-kind tools (typically MCP), surface
+    ;; the `rawInput' value when there is a single stringy field —
+    ;; agents like OpenCode put the meaningful detail there
+    ;; (e.g. emacs_eval-elisp's `expression') without populating
+    ;; the structured `content' channel that Claude Code uses.
+    (when-let* (((member (map-elt tool-call :kind) '(nil "other")))
+                ((null command))
+                ((null filepath))
+                ((= (length raw-input) 1))
+                (input-value (cdar raw-input))
+                ((stringp input-value))
+                ((not (string-empty-p input-value)))
+                ((or (not text)
+                     (not (string-match-p (regexp-quote input-value) text))))
+                ((not (seq-find (lambda (c-text)
+                                  (string-match-p (regexp-quote input-value) c-text))
+                                content-texts))))
+      (let ((fenced (agent-shell--format-tool-call-input raw-input)))
+        (setq text (if text (concat text "\n\n" fenced) fenced))))
     ;; Fold in ACP `content' text blocks attached to the tool call.
     ;; Skip blocks whose text is already a substring of what we
     ;; have (e.g. Claude mirrors `rawInput.description' in `content').

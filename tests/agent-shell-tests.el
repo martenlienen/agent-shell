@@ -2743,6 +2743,31 @@ copy should render."
               (:raw-input . ((filepath . "/home/user/foo.rs")))
               (:locations . [((path . "/home/user/foo.rs"))]))))))
 
+(ert-deftest agent-shell--permission-title-other-kind-single-stringy-raw-input-test ()
+  "Surface single stringy `rawInput' value for `other'-kind tools.
+OpenCode sends `emacs_eval-elisp' permission requests with the
+expression in `rawInput' and no structured `content'."
+  (should (equal
+           "emacs_eval-elisp\n\n```\n(+ 1 2 3)\n```"
+           (agent-shell--permission-title
+            :tool-call
+            '((:title . "emacs_eval-elisp")
+              (:kind . "other")
+              (:raw-input . ((expression . "(+ 1 2 3)"))))))))
+
+(ert-deftest agent-shell--permission-title-other-kind-raw-input-dedup-against-content-test ()
+  "Skip `rawInput' fence when its value already appears in `content'."
+  (should (equal
+           "emacs_eval-elisp\n\n(+ 1 2 3)"
+           (agent-shell--permission-title
+            :tool-call
+            `((:title . "emacs_eval-elisp")
+              (:kind . "other")
+              (:raw-input . ((expression . "(+ 1 2 3)")))
+              (:content . [((type . "content")
+                            (content (type . "text")
+                                     (text . "(+ 1 2 3)")))]))))))
+
 (ert-deftest agent-shell--permission-title-empty-content-and-locations-test ()
   "Empty `content' / `locations' vectors should not affect the title.
 Gemini sends these fields as empty arrays."
