@@ -4430,7 +4430,10 @@ DATA is an optional alist of event-specific data."
                  (or (not (map-elt sub :event))
                      (eq (map-elt sub :event) event)))
         (with-current-buffer (map-elt state :buffer)
-          (funcall (map-elt sub :on-event) event-alist))))))
+          (condition-case err
+              (funcall (map-elt sub :on-event) event-alist)
+            (error
+             (message "agent-shell: subscriber for %s errored: %S" event err))))))))
 
 (cl-defun agent-shell--start-idle-timer (&key event data)
   "Start the idle timer for EVENT with DATA.

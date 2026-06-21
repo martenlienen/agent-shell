@@ -1403,6 +1403,29 @@ code block content
       ;; Should not error when no subscriptions exist
       (agent-shell--emit-event :event 'init-client))))
 
+(ert-deftest agent-shell--emit-event-isolates-throwing-subscriber-test ()
+  "Test `agent-shell--emit-event' isolates a throwing subscriber.
+A subscriber signaling an error must not abort dispatch to the
+remaining subscribers nor propagate out of `agent-shell--emit-event'."
+  (let* ((received-events nil)
+         (agent-shell--state (list (cons :buffer (current-buffer))
+                                   (cons :event-subscriptions nil))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (agent-shell-subscribe-to
+       :shell-buffer (current-buffer)
+       :on-event (lambda (_event) (error "boom")))
+      (agent-shell-subscribe-to
+       :shell-buffer (current-buffer)
+       :on-event (lambda (event) (push event received-events)))
+
+      ;; Should not propagate the subscriber's error.
+      (agent-shell--emit-event :event 'init-client)
+
+      ;; The non-throwing subscriber must still have received the event.
+      (should (= (length received-events) 1))
+      (should (equal (map-elt (car received-events) :event) 'init-client)))))
+
 (ert-deftest agent-shell-subscribe-to-prompt-ready-test ()
   "Test subscribing to `prompt-ready' event."
   (let* ((received-events nil)
