@@ -1114,9 +1114,9 @@ Works from both shell and viewport buffers."
          (config (map-elt (buffer-local-value 'agent-shell--state shell-buffer)
                           :agent-config))
          (shell-dir (buffer-local-value 'default-directory shell-buffer))
-         (is-temp-shell (memq #'agent-shell--cleanup-default-directory
-                              (buffer-local-value 'kill-buffer-hook
-                                                  shell-buffer)))
+         (has-cleanup-hook (memq #'agent-shell--cleanup-default-directory
+                                 (buffer-local-value 'kill-buffer-hook
+                                                     shell-buffer)))
          ;; Remember where the shell is currently displayed
          (windows (get-buffer-window-list shell-buffer nil t)))
     (with-current-buffer shell-buffer
@@ -1133,7 +1133,7 @@ Works from both shell and viewport buffers."
                               :new-session t
                               :no-focus t)))
       (shell-maker-set-buffer-name new-shell-buffer shell-buffer-name)
-      (when is-temp-shell
+      (when has-cleanup-hook
         (with-current-buffer new-shell-buffer
           (add-hook 'kill-buffer-hook
                     #'agent-shell--cleanup-default-directory
