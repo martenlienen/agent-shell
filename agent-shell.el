@@ -5836,14 +5836,50 @@ If FILE-PATH is not an image, returns nil."
               (type-supported (image-supported-file-p file-path)))
     (create-image file-path nil nil :max-width max-width)))
 
+(defun agent-shell--image-data-to-file (data mime-type)
+  "Write base64-encoded image DATA of MIME-TYPE to a cache file.
+
+Returns the file path, or nil when DATA is missing or MIME-TYPE doesn't
+map to a known image extension.  The extension is validated against
+`image-file-name-extensions' rather than used verbatim, so an
+agent-supplied MIME-TYPE can't inject a path or stray characters into the
+file name.  The file is written regardless of whether this Emacs can
+inline-render the type, so the link remains openable.  The file name is
+otherwise derived from DATA's md5 so repeated chunks reuse the same file.
+
+Example:
+
+  (agent-shell--image-data-to-file \"iVBORw0KGgo...\" \"image/png\")
+  => \"/home/user/.cache/agent-shell/content-images/<md5>.png\""
+  (when-let* (((stringp data))
+              ((stringp mime-type))
+              (extension (pcase mime-type
+                           ("image/svg+xml" "svg")
+                           (_ (string-remove-prefix "image/" mime-type))))
+              ((member extension image-file-name-extensions))
+              (file (expand-file-name
+                     (format "%s.%s" (md5 data) extension)
+                     (agent-shell--cache-dir "content-images"))))
+    (unless (file-exists-p file)
+      (let ((coding-system-for-write 'binary))
+        (write-region (base64-decode-string data) nil file nil 'silent)))
+    file))
+
 (defun agent-shell--content-block-to-markdown (content-block)
   "Return markdown for a `session/update' CONTENT-BLOCK.
 
 Text blocks return their text.  Image blocks (a content block whose `type'
 is \"image\", e.g. an agent returning a screenshot) return a markdown image
 so the existing image-rendering path (`agent-shell--render-markdown' with
-:render-images t) displays them inline rather than dropping them.  An image
-block with no file uri returns an empty string.
+:render-images t) displays them inline rather than dropping them.
+
+An image block may carry its payload as a `uri' (used directly) or as
+base64 `data' (the spec-required field, decoded to a cache file when no
+`uri' is present).  An image block with neither returns an empty string.
+
+Any other block type (audio, resource, resource_link, or a future type we
+don't render yet) returns a \"[unsupported content: TYPE]\" placeholder, so
+unhandled content stays visible rather than being silently dropped.
 
 Examples:
 
@@ -5854,14 +5890,25 @@ Examples:
   (agent-shell--content-block-to-markdown
    \\='((type . \"image\") (uri . \"file:///tmp/shot.png\")))
   => \"\\n\\n![image](file:///tmp/shot.png)\\n\\n\""
-  (cond
-   ((not (equal (map-elt content-block 'type) "image"))
-    (or (map-elt content-block 'text) ""))
-   ((map-elt content-block 'uri)
-    (format "\n\n![%s](%s)\n\n"
-            (or (map-elt content-block 'name) "image")
-            (map-elt content-block 'uri)))
-   (t "")))
+  (pcase (map-elt content-block 'type)
+    ("text" (or (map-elt content-block 'text) ""))
+    ("image"
+     (cond
+      ((map-elt content-block 'uri)
+       (format "\n\n![%s](%s)\n\n"
+               (or (map-elt content-block 'name) "image")
+               (map-elt content-block 'uri)))
+      ;; Emit the bare absolute path (not a `file://' URI): it is a local
+      ;; cache file, and the renderer resolves absolute paths without URI
+      ;; parsing, so a cache dir containing `#' or spaces still renders.
+      ((when-let* ((file (agent-shell--image-data-to-file
+                          (map-elt content-block 'data)
+                          (map-elt content-block 'mimeType))))
+         (format "\n\n![%s](%s)\n\n"
+                 (or (map-elt content-block 'name) "image")
+                 file)))
+      (t "")))
+    (type (format "[unsupported content: %s]" (or type "unknown")))))
 
 (cl-defun agent-shell--collect-attached-files (content-blocks)
   "Collect attached resource uris from CONTENT-BLOCKS."

@@ -426,10 +426,115 @@ image-rendering path as `![alt](uri)'."
                       (uri . "file:///tmp/x.png")))
                    "")))
 
-  ;; Unknown block type with no text -> empty string (graceful, not error).
+  ;; A remote (http) uri is passed through verbatim.  The renderer only
+  ;; resolves local paths, so it won't inline-render today; this pins the
+  ;; pass-through until remote fetching is added.
+  (should (equal (agent-shell--content-block-to-markdown
+                  '((type . "image")
+                    (mimeType . "image/png")
+                    (uri . "https://example.com/x.png")))
+                 "\n\n![image](https://example.com/x.png)\n\n"))
+
+  ;; Unhandled block type -> a visible placeholder (so lagging support is
+  ;; spottable), not a silent drop.
   (should (equal (agent-shell--content-block-to-markdown
                   '((type . "audio") (mimeType . "audio/wav")))
-                 "")))
+                 "[unsupported content: audio]"))
+
+  ;; Image block carrying base64 `data' (the spec-required field, no uri) is
+  ;; decoded to a cache file and referenced as a markdown image rather than
+  ;; dropped.
+  (let* ((png "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=")
+         (markdown (agent-shell--content-block-to-markdown
+                    `((type . "image") (mimeType . "image/png") (data . ,png)))))
+    ;; A bare absolute cache path (no `file://'), so paths with URI-special
+    ;; characters still resolve.
+    (should (string-match "\\`\n\n!\\[image\\](\\(/.*\\.png\\))\n\n\\'" markdown))
+    (should (file-exists-p (match-string 1 markdown)))
+    (delete-file (match-string 1 markdown)))
+
+  ;; When both `uri' and `data' are present the `uri' is used directly (no
+  ;; redundant decode); `data' is only a fallback when `uri' is absent.
+  (should (equal (agent-shell--content-block-to-markdown
+                  '((type . "image") (mimeType . "image/png")
+                    (uri . "file:///tmp/shot.png")
+                    (data . "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=")))
+                 "\n\n![image](file:///tmp/shot.png)\n\n")))
+
+(ert-deftest agent-shell--image-data-to-file-test ()
+  "Test `agent-shell--image-data-to-file'.
+
+Image content blocks carry their payload as base64 `data' (the spec-required
+field).  This writes that payload to a cache file so it can be rendered or
+opened.  The extension is validated against `image-file-name-extensions', so
+an agent-supplied MIME-TYPE cannot inject a path or stray characters into the
+file name."
+  (let ((png "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII="))
+    ;; Valid PNG data -> a real file with a .png extension under the cache dir.
+    (let ((file (agent-shell--image-data-to-file png "image/png")))
+      (should (stringp file))
+      (should (string-suffix-p ".png" file))
+      (should (file-exists-p file))
+      (delete-file file))
+
+    ;; image/svg+xml maps to a .svg extension (not the literal "svg+xml").
+    (let ((file (agent-shell--image-data-to-file png "image/svg+xml")))
+      (should (string-suffix-p ".svg" file))
+      (delete-file file))
+
+    ;; Missing data -> nil (nothing to write).
+    (should-not (agent-shell--image-data-to-file nil "image/png"))
+
+    ;; Unknown image subtype -> nil (not in `image-file-name-extensions').
+    (should-not (agent-shell--image-data-to-file png "image/whatever"))
+
+    ;; SECURITY: a MIME-TYPE smuggling a path or stray characters past the
+    ;; `image/' prefix is rejected outright by the extension allowlist, so
+    ;; nothing is written outside the cache dir.
+    (should-not (agent-shell--image-data-to-file png "image/../../../tmp/evil"))
+    (should-not (agent-shell--image-data-to-file png "image/png ../evil"))))
+
+(ert-deftest agent-shell--on-notification-agent-message-chunk-markdown-test ()
+  "Test `agent_message_chunk' rendering wires through to markdown.
+
+Drives an ACP `session/update' notification through
+`agent-shell--on-notification' and asserts the body handed to the renderer
+is what `agent-shell--content-block-to-markdown' produces for the content
+block -- covering the dispatch path, not just the helper in isolation."
+  (let ((state (list (cons :chunked-group-count 0)
+                     ;; Pre-set so the header/end-of-prompt branches are
+                     ;; skipped; the test only exercises content rendering.
+                     (cons :last-entry-type "agent_message_chunk")
+                     (cons :last-activity-time nil)))
+        (rendered nil))
+    (cl-letf (((symbol-function 'agent-shell--active-requests-p)
+               (lambda (_state) t))
+              ((symbol-function 'agent-shell--append-transcript)
+               #'ignore)
+              ((symbol-function 'agent-shell--update-fragment)
+               (lambda (&rest args) (setq rendered (plist-get args :body)))))
+      ;; Text content block -> its text.
+      (agent-shell--on-notification
+       :state state
+       :acp-notification '((method . "session/update")
+                           (params
+                            (update
+                             (sessionUpdate . "agent_message_chunk")
+                             (content (type . "text") (text . "hello"))))))
+      (should (equal rendered "hello"))
+
+      ;; Image content block with a uri -> a markdown image, not a dropped
+      ;; or text-only chunk.
+      (agent-shell--on-notification
+       :state state
+       :acp-notification '((method . "session/update")
+                           (params
+                            (update
+                             (sessionUpdate . "agent_message_chunk")
+                             (content (type . "image")
+                                      (mimeType . "image/png")
+                                      (uri . "file:///tmp/x.png"))))))
+      (should (equal rendered "\n\n![image](file:///tmp/x.png)\n\n")))))
 
 (ert-deftest agent-shell--collect-attached-files-test ()
   "Test agent-shell--collect-attached-files function."
